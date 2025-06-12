@@ -1,0 +1,236 @@
+
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <title>Open Port Scanner with Stop</title>
+  <style>
+    body {
+      font-family: Arial, sans-serif;
+      max-width: 600px;
+      margin: 30px auto;
+      background: #fafafa;
+      padding: 20px;
+      border-radius: 8px;
+      box-shadow: 0 0 8px rgba(0,0,0,0.1);
+    }
+    input, button {
+      font-size: 16px;
+      padding: 8px;
+      margin: 5px 0;
+      width: 100%;
+      box-sizing: border-box;
+      border: 1px solid #ccc;
+      border-radius: 4px;
+    }
+    button {
+      cursor: pointer;
+      border: none;
+      color: white;
+    }
+    #startBtn {
+      background-color: #28a745;
+    }
+    #startBtn:disabled {
+      background-color: #aaa;
+      cursor: not-allowed;
+    }
+    #stopBtn {
+      background-color: #dc3545;
+      margin-top: 10px;
+    }
+    #stopBtn:disabled {
+      background-color: #aaa;
+      cursor: not-allowed;
+    }
+    #results {
+      margin-top: 20px;
+      background: white;
+      padding: 15px;
+      border: 1px solid #ddd;
+      min-height: 150px;
+      white-space: pre-wrap;
+      max-height: 400px;
+      overflow-y: auto;
+      font-family: monospace;
+    }
+    .open-port {
+      color: green;
+      font-weight: bold;
+    }
+    .closed-port {
+      color: gray;
+    }
+    .internet-status {
+      font-weight: bold;
+      margin-top: 10px;
+    }
+    .online {
+      color: green;
+    }
+    .offline {
+      color: red;
+    }
+  </style>
+</head>
+<body>
+  <h2>🔍 Open Port Scanner with Stop & Internet Status</h2>
+
+  <label>
+    Target IP / Domain:
+    <input type="text" id="target" value="127.0.0.1" />
+  </label>
+
+  <label>
+    Ports (comma separated or range e.g. 80,443,8080-8090):
+    <input type="text" id="ports" value="80,443,8080-8090" />
+  </label>
+
+  <button id="startBtn" onclick="startScan()">Start Scan</button>
+  <button id="stopBtn" onclick="stopScan()" disabled>Stop Scan</button>
+
+  <div id="internetStatus" class="internet-status">Checking internet connection...</div>
+  <div id="results">Results will appear here...</div>
+
+  <script>
+    let stopRequested = false;
+
+    function parsePorts(input) {
+      const parts = input.split(',');
+      const ports = new Set();
+
+      for (let part of parts) {
+        part = part.trim();
+        if (part.includes('-')) {
+          const [start, end] = part.split('-').map(Number);
+          for (let p = start; p <= end; p++) {
+            if (p > 0 && p <= 65535) ports.add(p);
+          }
+        } else {
+          const p = Number(part);
+          if (p > 0 && p <= 65535) ports.add(p);
+        }
+      }
+      return Array.from(ports).sort((a,b)=>a-b);
+    }
+
+    async function testPort(target, port, timeout = 1500) {
+      const url = `http://${target}:${port}`;
+      const controller = new AbortController();
+      const signal = controller.signal;
+
+      const timeoutId = setTimeout(() => controller.abort(), timeout);
+
+      try {
+        await fetch(url, {mode: 'no-cors', signal});
+        clearTimeout(timeoutId);
+        return true;
+      } catch (e) {
+        return false;
+      }
+    }
+
+    async function checkInternetConnection(timeout = 3000) {
+      try {
+        const controller = new AbortController();
+        const signal = controller.signal;
+        const timeoutId = setTimeout(() => controller.abort(), timeout);
+
+        await fetch('https://www.google.com/favicon.ico', {mode: 'no-cors', signal});
+        clearTimeout(timeoutId);
+        return true;
+      } catch {
+        return false;
+      }
+    }
+
+    async function startScan() {
+      stopRequested = false;
+      const startBtn = document.getElementById('startBtn');
+      const stopBtn = document.getElementById('stopBtn');
+      const resultsDiv = document.getElementById('results');
+      const targetInput = document.getElementById('target');
+      const portsInput = document.getElementById('ports');
+      const internetStatus = document.getElementById('internetStatus');
+
+      startBtn.disabled = true;
+      stopBtn.disabled = false;
+      resultsDiv.innerHTML = '';
+      internetStatus.textContent = 'Checking internet connection...';
+      internetStatus.className = 'internet-status';
+
+      const target = targetInput.value.trim();
+      const portsStr = portsInput.value.trim();
+
+      if (!target) {
+        alert('Please enter a target IP or domain');
+        startBtn.disabled = false;
+        stopBtn.disabled = true;
+        return;
+      }
+      if (!portsStr) {
+        alert('Please enter ports or ranges');
+        startBtn.disabled = false;
+        stopBtn.disabled = true;
+        return;
+      }
+
+      const ports = parsePorts(portsStr);
+      if (ports.length === 0) {
+        resultsDiv.textContent = 'No valid ports found.';
+        startBtn.disabled = false;
+        stopBtn.disabled = true;
+        return;
+      }
+
+      const internetConnected = await checkInternetConnection();
+      if(internetConnected) {
+        internetStatus.textContent = '🌐 Internet Connection: Online';
+        internetStatus.classList.add('online');
+      } else {
+        internetStatus.textContent = '❌ Internet Connection: Offline';
+        internetStatus.classList.add('offline');
+      }
+
+      resultsDiv.innerHTML = `Scanning ${ports.length} ports on ${target}...
+
+Open ports:
+`;
+
+      for (const port of ports) {
+        if (stopRequested) {
+          resultsDiv.innerHTML += '
+Scan stopped by user.
+';
+          break;
+        }
+
+        resultsDiv.innerHTML += `Testing port ${port} ... `;
+
+        // test port
+        const open = await testPort(target, port);
+
+        if (open) {
+          resultsDiv.innerHTML += `<span class="open-port">${port} Open</span>
+`;
+        } else {
+          resultsDiv.innerHTML = resultsDiv.innerHTML.trimEnd() + '
+';
+        }
+      }
+
+      if(!stopRequested) {
+        resultsDiv.innerHTML += `
+Scan complete.`;
+      }
+      startBtn.disabled = false;
+      stopBtn.disabled = true;
+    }
+
+    function stopScan() {
+      stopRequested = true;
+      document.getElementById('stopBtn').disabled = true;
+    }
+  </script>
+</body>
+</html>
